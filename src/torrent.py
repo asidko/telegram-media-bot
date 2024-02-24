@@ -73,6 +73,20 @@ def logout(session):
         pass
 
 
+def verify_not_magnet_link(torrent_link):
+    if not torrent_link:
+        return False
+    if torrent_link.startswith('magnet:'):
+        return False
+    response = requests.head(torrent_link, allow_redirects=False)
+    # If redirect get the new location
+    if response.status_code == 302:
+        location = response.headers['Location']
+        if not location.startswith('magnet:'):
+            return True
+    return False
+
+
 def create_magnet_link_from_url(torrent_file_url):
     # Retrieve the torrent file content from the URL
     response = ''
@@ -117,6 +131,7 @@ def create_magnet_link_from_url(torrent_file_url):
 
     # Return the magnet link
     return magnet_link
+
 
 # Main
 if __name__ == '__main__':
