@@ -1,6 +1,9 @@
 import hashlib
 import os
+import threading
+from collections import deque
 from dataclasses import dataclass, field
+import time
 
 import dotenv
 import requests
@@ -9,7 +12,6 @@ from cachetools import TTLCache
 
 from jackett import search_jackett
 from localization import localized
-from torrent import verify_not_magnet_link
 from torrent import create_magnet_link_from_url
 
 dotenv.load_dotenv()
@@ -19,6 +21,12 @@ bot = telebot.TeleBot(os.getenv('BOT_TOKEN'))
 results_cache = TTLCache(maxsize=10000, ttl=2_592_000)  # cache for 30 days
 
 MAX_QUERY_TEXT_LENGTH = 255
+WAIT_TIMEOUT_TO_NOTIFY_SECONDS = 15
+search_execution_times = deque(maxlen=5)
+
+
+def get_avarage_search_execution_time():
+    return round(sum(search_execution_times) / len(search_execution_times)) if search_execution_times else 0
 
 
 @dataclass
@@ -71,12 +79,12 @@ def select(message):
     torrent_link = selected_result["torrent"]
 
     # Create magnet link from torrent of not present
+    magnet_link_from_torrent, is_torrent_file_present, torrent_file_content = create_magnet_link_from_url(torrent_link)
     if not magnet_link and torrent_link:
-        magnet_link = create_magnet_link_from_url(torrent_link)
+        magnet_link = magnet_link_from_torrent
 
     # Upload torrent file document
-    is_real_torrent_file_link = torrent_link and verify_not_magnet_link(torrent_link)
-    torrent_file_bytes = requests.get(torrent_link).content if is_real_torrent_file_link else None
+    torrent_file_bytes = torrent_file_content if is_torrent_file_present else None
 
     html_hex = f'<a href="{magnet_link}">&#129522; Your magnet link</a>'.encode('utf-8').hex()
 
@@ -144,7 +152,8 @@ def say(response: UserResponse) -> None:
     bot.send_message(response.user_id, response.message, parse_mode="HTML", reply_markup=keyboard)
 
     for file in response.files:
-        bot.send_document(response.user_id, file.file_bytes, visible_file_name=file.file_name)
+        if file.file_bytes:
+            bot.send_document(response.user_id, file.file_bytes, visible_file_name=file.file_name)
 
 
 @bot.message_handler(content_types=['text'], regexp="^[^/]")
@@ -159,7 +168,7 @@ def get_text_messages(message):
     ))
 
     text = clean_text(text)
-    results = search_jackett(text)
+    results = threaded_search_jackett(text, message)
     query_hash = hashlib.md5(text.encode()).hexdigest()
     results_cache[query_hash] = results
 
@@ -170,6 +179,47 @@ def get_text_messages(message):
         ))
 
     print_query_results(query_hash, message, results, localized(message, 'results_by_popularity'))
+
+
+def threaded_search_jackett(text, message) -> list[dict]:
+    start_time = time.time()
+    result = []
+
+    def run_search():
+        nonlocal result
+        result = search_jackett(text)
+
+    search_thread = threading.Thread(target=run_search)
+    search_thread.start()
+
+    # Start a separate thread to log a warning message after 8 seconds
+    def say_warning():
+        time.sleep(WAIT_TIMEOUT_TO_NOTIFY_SECONDS)
+        if search_thread.is_alive():
+
+            average_time = get_avarage_search_execution_time()
+
+            if average_time < WAIT_TIMEOUT_TO_NOTIFY_SECONDS:
+                alert = localized(message, 'search_time_alert_takes_longer')
+            else:
+                alert = localized(message, 'search_time_alert', average_time)
+
+            say(UserResponse(
+                user_id=message.from_user.id,
+                message=alert
+            ))
+
+    alert_thread = threading.Thread(target=say_warning)
+    alert_thread.start()
+
+    search_thread.join()
+    alert_thread.join()
+
+    end_time_seconds = time.time() - start_time
+    if end_time_seconds >= 5:  # ignore fast cached searches
+        search_execution_times.append(end_time_seconds)
+
+    return result
 
 
 def clean_text(text):

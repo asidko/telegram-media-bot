@@ -73,24 +73,12 @@ def logout(session):
         pass
 
 
-def verify_not_magnet_link(torrent_link):
-    if not torrent_link:
-        return False
-    if torrent_link.startswith('magnet:'):
-        return False
-    response = requests.head(torrent_link, allow_redirects=False)
-    # If redirect get the new location
-    if response.status_code == 302:
-        location = response.headers['Location']
-        if not location.startswith('magnet:'):
-            return True
-    return False
-
-
-def create_magnet_link_from_url(torrent_file_url):
-    # Retrieve the torrent file content from the URL
-    response = ''
-
+def create_magnet_link_from_url(torrent_file_url) -> (str, bool, str):
+    """
+    Create a magnet link from a torrent file URL
+    :return: tuple of magnet link, bool representing was it converted from torrent file
+    (True if magnet was created from torrent file), torrent file bytes
+    """
     response = requests.get(torrent_file_url, allow_redirects=False)
 
     # If redirect get the new location
@@ -100,7 +88,7 @@ def create_magnet_link_from_url(torrent_file_url):
         if not location.startswith('magnet:'):
             response = requests.get(location, allow_redirects=False)
         else:
-            return location
+            return location, False, ""
 
     if response.status_code != 200:
         return "Error downloading torrent file"
@@ -130,7 +118,7 @@ def create_magnet_link_from_url(torrent_file_url):
         magnet_link += f"&dn={encoded_display_name}"
 
     # Return the magnet link
-    return magnet_link
+    return magnet_link, True, torrent_data
 
 
 # Main

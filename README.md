@@ -36,15 +36,15 @@ Use the buttons to filter the results.
 
 <img width="775" alt="image" src="https://github.com/asidko/asidko/assets/22843881/28e45c88-313d-44d5-9808-2b3ad1e8972d">
 
-Choose a torrent from the list and lick the `/select...` link to get the magnet.
+Choose a torrent from the list and click the `/select...` link to get your download.
 
-<img width="612" alt="image" src="https://github.com/asidko/asidko/assets/22843881/90e284a8-2052-47c0-b666-c7b88b9085d0">
+<img width="750" alt="image" src="https://github.com/asidko/telegram-media-bot/assets/22843881/b1afa83a-9009-43ac-8f81-070a778d5d4d">
 
 Press the button to download the torrent.
 
 ### Disclaimer
 
-This bot is intended for educational purposes only. The author does not condone the use of this bot for illegal activities.  
+This project is intended for educational purposes only. The author does not condone the use of it for illegal activities.  
 
 
 
