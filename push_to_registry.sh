@@ -26,4 +26,5 @@ echo $DOCKER_PASSWORD | docker login -u windranger --password-stdin
 
 # Push the image to docker registry
 echo "Pushing the image to docker registry"
-docker push $IMAGE --all-tags
+docker push $IMAGE
+docker push windranger/telegram-media-bot:latest

@@ -80,8 +80,8 @@ def select(message):
 
     # Create magnet link from torrent of not present
     magnet_link_from_torrent, is_torrent_file_present, torrent_file_content = create_magnet_link_from_url(torrent_link)
-    if not magnet_link and torrent_link:
-        magnet_link = magnet_link_from_torrent
+    if torrent_link and not magnet_link:
+        magnet_link = magnet_link_from_torrent if magnet_link_from_torrent else localized(message, 'missing_magnet_link')
 
     # Upload torrent file document
     torrent_file_bytes = torrent_file_content if is_torrent_file_present else None

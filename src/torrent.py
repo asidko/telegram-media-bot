@@ -79,6 +79,9 @@ def create_magnet_link_from_url(torrent_file_url) -> (str, bool, str):
     :return: tuple of magnet link, bool representing was it converted from torrent file
     (True if magnet was created from torrent file), torrent file bytes
     """
+    if not torrent_file_url:
+        return "", False, ""
+
     response = requests.get(torrent_file_url, allow_redirects=False)
 
     # If redirect get the new location
