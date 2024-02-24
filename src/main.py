@@ -8,8 +8,8 @@ import telebot
 from cachetools import TTLCache
 
 from jackett import search_jackett
-from src.locale import localized
-from src.torrent import verify_not_magnet_link
+from localization import localized
+from torrent import verify_not_magnet_link
 from torrent import create_magnet_link_from_url
 
 dotenv.load_dotenv()
