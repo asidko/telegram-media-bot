@@ -257,7 +257,7 @@ def print_query_results(query_hash, message, results, title_to_show):
 
 
 def create_filter_controls(query_hash, message, results) -> list[ResponseControl]:
-    sizes_gb = [result['size_bytes'] / (1024 ** 3) for result in results]
+    sizes_gb = [result['size_bytes'] / (1024 ** 3) for result in results if result['size_bytes']]
     hasLessThan2GB = any(size < 2 for size in sizes_gb)
     hasMoreThan4GB = any(size > 4 for size in sizes_gb)
     hasMoreThan10GB = any(size > 10 for size in sizes_gb)

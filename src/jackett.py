@@ -39,9 +39,9 @@ def search_jackett(query):
         # Iterate through the results and extract the desired information
         for result in results.get('Results', []):
             # Extracting the required fields from each result
-            size = result.get('Size')
+            size = result.get('Size') if result.get('Size') else 0
             # Convert size to human-readable format
-            human_readable_size = humanize.naturalsize(size, format='%.2f', binary=False)
+            human_readable_size = humanize.naturalsize(size, format='%.2f', binary=False) if size else "-"
             # Generate UUID
             id = ''.join(choice(string.ascii_uppercase + string.digits) for _ in range(6))
             parsed_result = {
