@@ -5,20 +5,23 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from urllib.parse import urlparse, urlunparse
 
 import dotenv
 import telebot
 from cachetools import TTLCache
+from telebot.apihelper import ApiTelegramException
 
 from jackett import search_jackett
 from localization import localized
 from torrent_provider import get_torrent_info_by_magnet_link
-from torrserver import get_file_as_link
+from torrserver import get_file, get_file_download_link
 from torrent import create_magnet_link_from_url
 
 dotenv.load_dotenv()
 
 bot = telebot.TeleBot(os.getenv('BOT_TOKEN'))
+advertised_torrserver_host = os.getenv('ADVERTISED_TORRSERVER_HOST')
 
 results_cache = TTLCache(maxsize=10000, ttl=2_592_000)  # cache for 30 days
 
@@ -63,18 +66,60 @@ def select(message):
 @bot.message_handler(regexp="^/test_upload")
 def select(message):
     print("Getting a file")
-    file_bytes = get_file_as_link('92656c49d99a3b30eee6d66b614d8d15afcaa794', 1)
+    file_bytes = get_file('92656c49d99a3b30eee6d66b614d8d15afcaa794', 1)
     print("Sending file")
     bot.send_document(message.from_user.id, file_bytes, visible_file_name='test')
 
+
+@bot.message_handler(regexp="^/file")
+def file(message):
+    print("Received message from: %s, text: %s" % (message.from_user.id, message.text))
+    select_value = message.text.split("/file_")[1]
+    query_key, item_key, file_id = select_value.split('_')
+
+    selected_result = find_item_by_key(query_key, item_key)
+
+    if selected_result is None:
+        return say(UserResponse(
+            user_id=message.from_user.id,
+            message=localized(message, 'option_not_found')
+        ))
+
+    magnet_link = selected_result["magnet_calculated"]
+    if not magnet_link:
+        pass
+
+    def print_download_link(message, torrent_info, selected_file_id):
+        hash = torrent_info.hash
+        link = get_file_download_link(hash, selected_file_id)
+        link = advertised_torrserver_host + remove_host_from_url(link)
+        file_title = next((f'<b>{os.path.basename(f.title)}</b> - {f.size}' for f in torrent_info.files if str(f.id) == selected_file_id), 'Unknown file')
+        text = f"🥂 Downloading\n{file_title}"
+        text += f"\n<pre>{link}</pre>"
+        text += "\n<i>* Rename file after download if needed</i>"
+        text += "\n<i>** You can pass the links to the media players like VLC to stream the content directly</i>"
+        response = UserResponse(user_id=message.from_user.id,
+                                message=text,
+                                controls=[ResponseControl(title='Download', action_url=link)])
+        try:
+            # Try with button
+            say(response)
+        except Exception as e:
+            # Try without button, if link in button fails
+            say(dataclasses.replace(response, controls=[]))
+
+
+
+    get_torrent_info_by_magnet_link(magnet_link, lambda torrent_info: print_download_link(message,torrent_info, file_id))
 
 
 @bot.message_handler(regexp="^/select")
 def select(message):
     print("Received message from: %s, text: %s" % (message.from_user.id, message.text))
-    select_key = message.text.split("/select_")[1]
+    select_value = message.text.split("/select_")[1]
+    query_key, item_key = select_value.split('_')
 
-    selected_result = find_item_by_select_key(select_key)
+    selected_result = find_item_by_key(query_key, item_key)
 
     if selected_result is None:
         return say(UserResponse(
@@ -94,6 +139,8 @@ def select(message):
     if torrent_link and not magnet_link:
         magnet_link = magnet_link_from_torrent if magnet_link_from_torrent else localized(message,
                                                                                           'missing_magnet_link')
+    # Save magnet link back to result
+    selected_result["magnet_calculated"] = magnet_link
 
     # Upload torrent file document
     torrent_file_bytes = torrent_file_content if is_torrent_file_present else None
@@ -107,30 +154,30 @@ def select(message):
                                  files=[ResponseFile(file_name=f'{title}.torrent', file_bytes=torrent_file_bytes)])
     message_id = say(user_response)
 
-    def edit_response_with_updated_data(current_response, message_id, torrent_info):
+    def edit_response_with_updated_data(current_response, message_id, query_key, item_key, torrent_info):
         new_message = current_response.message
         new_message += f'\n\n🗂️Files in torrent:\n'
-        new_message += '<code>'
         limit = 10
         for f in torrent_info.files:
             if (limit := limit - 1) < 0:
                 new_message += '...'
                 break
-            new_message += f'{f.size} {f.title}\n'
-        new_message += '</code>'
+            new_message += f'/file_{query_key}_{item_key}_{f.id} ⤵	\n'
+            new_message += f'{f.title} - {f.size}\n'
 
         new_response = dataclasses.replace(current_response, message=new_message)
         say(new_response, message_id)
 
     get_torrent_info_by_magnet_link(magnet_link, lambda torrent_info: edit_response_with_updated_data(user_response,
                                                                                                       message_id,
+                                                                                                      query_key,
+                                                                                                      item_key,
                                                                                                       torrent_info))
 
 
-def find_item_by_select_key(select_key):
-    query_cache_key, item_id = select_key.split('_')
-    results = results_cache.get(query_cache_key, [])
-    return next((result for result in results if result['id'] == item_id), None)
+def find_item_by_key(query_key, item_key):
+    results = results_cache.get(query_key, [])
+    return next((result for result in results if result['id'] == item_key), None)
 
 
 # handle button click
@@ -200,7 +247,7 @@ def get_text_messages(message):
 
     text = clean_text(text)
     results = threaded_search_jackett(text, message)
-    query_hash = hashlib.md5(text.encode()).hexdigest()
+    query_hash = hashlib.md5(text.encode()).hexdigest().upper()[:6]
     results_cache[query_hash] = results
 
     if not results:
@@ -308,5 +355,12 @@ def create_filter_controls(query_hash, message, results) -> list[ResponseControl
                                         action_key=f"filter_more_size_10:{query_hash}"))
     return controls
 
+
+def remove_host_from_url(url) -> str:
+    parsed_url = urlparse(url)
+    # Create a new URL with the scheme and netloc set to empty
+    modified_url = parsed_url._replace(scheme='', netloc='')
+    # Construct the URL without the scheme and netloc
+    return str(urlunparse(modified_url))
 
 bot.infinity_polling(timeout=60, long_polling_timeout=2)

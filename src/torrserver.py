@@ -52,12 +52,16 @@ def get_info(id: str) -> dict:
     return data
 
 
-def get_file_as_link(id: str, file_num: int) -> BytesIO:
+def get_file(id: str, file_num: int) -> BytesIO:
     # http://localhost:8090/play/<hash_id>/<file_id>
 
-    url = f"${torrserver_url}/play/{id}/{file_num}"
+    url = get_file_download_link(file_num, id)
 
     download_response = requests.get(url, stream=True)
     download_response.raise_for_status()  # Ensure we got a successful response
 
     return io.BytesIO(download_response.content)
+
+
+def get_file_download_link(hash, file_id) -> str:
+    return f"{torrserver_url}/play/{hash}/{file_id}"
