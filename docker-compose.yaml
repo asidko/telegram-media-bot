@@ -6,3 +6,12 @@ services:
     env_file:
       - .env # make sure to rename .env.example to .env and fix the values
     restart: always
+
+  torrserver:
+    image: solopasha/torrserver:v132
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Etc/UTC
+    ports:
+      - 8091:8090

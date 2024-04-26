@@ -1,17 +1,19 @@
+import dataclasses
 import hashlib
 import os
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
-import time
 
 import dotenv
-import requests
 import telebot
 from cachetools import TTLCache
 
 from jackett import search_jackett
 from localization import localized
+from torrent_provider import get_torrent_info_by_magnet_link
+from torrserver import get_file_as_link
 from torrent import create_magnet_link_from_url
 
 dotenv.load_dotenv()
@@ -25,7 +27,7 @@ WAIT_TIMEOUT_TO_NOTIFY_SECONDS = 15
 search_execution_times = deque(maxlen=5)
 
 
-def get_avarage_search_execution_time():
+def get_average_search_execution_time():
     return round(sum(search_execution_times) / len(search_execution_times)) if search_execution_times else 0
 
 
@@ -58,6 +60,15 @@ def select(message):
     ))
 
 
+@bot.message_handler(regexp="^/test_upload")
+def select(message):
+    print("Getting a file")
+    file_bytes = get_file_as_link('92656c49d99a3b30eee6d66b614d8d15afcaa794', 1)
+    print("Sending file")
+    bot.send_document(message.from_user.id, file_bytes, visible_file_name='test')
+
+
+
 @bot.message_handler(regexp="^/select")
 def select(message):
     print("Received message from: %s, text: %s" % (message.from_user.id, message.text))
@@ -81,25 +92,39 @@ def select(message):
     # Create magnet link from torrent of not present
     magnet_link_from_torrent, is_torrent_file_present, torrent_file_content = create_magnet_link_from_url(torrent_link)
     if torrent_link and not magnet_link:
-        magnet_link = magnet_link_from_torrent if magnet_link_from_torrent else localized(message, 'missing_magnet_link')
+        magnet_link = magnet_link_from_torrent if magnet_link_from_torrent else localized(message,
+                                                                                          'missing_magnet_link')
 
     # Upload torrent file document
     torrent_file_bytes = torrent_file_content if is_torrent_file_present else None
 
     html_hex = f'<a href="{magnet_link}">&#129522; Your magnet link</a>'.encode('utf-8').hex()
 
-    say(UserResponse(
-        user_id=message.from_user.id,
-        message=f'<b>{title}</b>\n\n📄️{size} 🌱{seeds} 🏁<i>{tracker}</i>',
-        controls=[ResponseControl(
-            title=localized(message, 'magnet_link'),
-            action_url=f'https://asidko.github.io/html-render/?title=Download%20link&content={html_hex}'
-        )],
-        files=[ResponseFile(
-            file_name=f'{title}.torrent',
-            file_bytes=torrent_file_bytes
-        )]
-    ))
+    user_response = UserResponse(user_id=message.from_user.id,
+                                 message=f'<b>{title}</b>\n\n📄️{size} 🌱{seeds} 🏁<i>{tracker}</i>',
+                                 controls=[ResponseControl(title=localized(message, 'magnet_link'),
+                                                           action_url=f'https://asidko.github.io/html-render/?title=Download%20link&content={html_hex}')],
+                                 files=[ResponseFile(file_name=f'{title}.torrent', file_bytes=torrent_file_bytes)])
+    message_id = say(user_response)
+
+    def edit_response_with_updated_data(current_response, message_id, torrent_info):
+        new_message = current_response.message
+        new_message += f'\n\n🗂️Files in torrent:\n'
+        new_message += '<code>'
+        limit = 10
+        for f in torrent_info.files:
+            if (limit := limit - 1) < 0:
+                new_message += '...'
+                break
+            new_message += f'{f.size} {f.title}\n'
+        new_message += '</code>'
+
+        new_response = dataclasses.replace(current_response, message=new_message)
+        say(new_response, message_id)
+
+    get_torrent_info_by_magnet_link(magnet_link, lambda torrent_info: edit_response_with_updated_data(user_response,
+                                                                                                      message_id,
+                                                                                                      torrent_info))
 
 
 def find_item_by_select_key(select_key):
@@ -139,7 +164,7 @@ def handle_query(call):
         return
 
 
-def say(response: UserResponse) -> None:
+def say(response: UserResponse, message_id_to_edit=None) -> int:
     keyboard = None
 
     if len(response.controls) > 0:
@@ -149,11 +174,17 @@ def say(response: UserResponse) -> None:
                 'text': control.title, 'url': control.action_url}
             keyboard.add(telebot.types.InlineKeyboardButton(**params))
 
-    bot.send_message(response.user_id, response.message, parse_mode="HTML", reply_markup=keyboard)
+    if message_id_to_edit is None:
+        message = bot.send_message(response.user_id, response.message, parse_mode="HTML", reply_markup=keyboard)
+    else:
+        message = bot.edit_message_text(response.message, response.user_id, message_id_to_edit, parse_mode="HTML",
+                                        reply_markup=keyboard)
 
     for file in response.files:
         if file.file_bytes:
             bot.send_document(response.user_id, file.file_bytes, visible_file_name=file.file_name)
+
+    return message.message_id
 
 
 @bot.message_handler(content_types=['text'], regexp="^[^/]")
@@ -197,7 +228,7 @@ def threaded_search_jackett(text, message) -> list[dict]:
         time.sleep(WAIT_TIMEOUT_TO_NOTIFY_SECONDS)
         if search_thread.is_alive():
 
-            average_time = get_avarage_search_execution_time()
+            average_time = get_average_search_execution_time()
 
             if average_time < WAIT_TIMEOUT_TO_NOTIFY_SECONDS:
                 alert = localized(message, 'search_time_alert_takes_longer')
@@ -278,4 +309,4 @@ def create_filter_controls(query_hash, message, results) -> list[ResponseControl
     return controls
 
 
-bot.polling(none_stop=True, interval=0)
+bot.infinity_polling(timeout=60, long_polling_timeout=2)

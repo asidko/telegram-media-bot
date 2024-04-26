@@ -1,76 +1,14 @@
-import base64
 import hashlib
-import os
 import urllib
+from pprint import pprint
 
 import bencodepy
 import dotenv
 import requests
-from requests.exceptions import InvalidSchema
+
+from torrserver import add_torrent, get_info, get_file_as_link
 
 dotenv.load_dotenv()
-
-QBITTORRENT_URL = os.getenv('QBITTORRENT_URL')
-QBITTORRENT_LOGIN = os.getenv('QBITTORRENT_LOGIN')
-QBITTORRENT_PASSWORD = os.getenv('QBITTORRENT_PASSWORD')
-
-
-def add_torrent_to_qbittorrent(torrent_link, name, tag='default') -> bool:
-    # Login to qBittorrent Web UI
-    session = login()
-
-    if session is None:
-        print('Failed to login to qBittorrent')
-
-    add_url = f'{QBITTORRENT_URL}/api/v2/torrents/add'
-    files = None
-
-    params = {
-        'rename': name,
-        'tags': tag,
-        'sequentialDownload': "true",
-        'firstLastPiecePrio': "true",
-        "skip_checking": "true",
-        "ratioLimit": "1",
-        "seedingTimeLimit": "1440",
-    }
-
-    if torrent_link.startswith('magnet:'):
-        params['urls'] = torrent_link
-    else:
-        torrent_file = requests.get(torrent_link)
-        files = {'torrents': ('torrent_file.torrent', torrent_file.content)}
-
-    # Add torrent to qBittorrent
-    response = session.post(add_url, data=params, files=files)
-
-    logout(session)
-
-    if response.ok:
-        return True
-    else:
-        return False
-
-
-def login():
-    session = requests.Session()
-    login_url = f'{QBITTORRENT_URL}/api/v2/auth/login'
-    login_data = {'username': QBITTORRENT_LOGIN, 'password': QBITTORRENT_PASSWORD}
-    response = session.post(login_url, data=login_data)
-
-    if response.ok:
-        return session
-    else:
-        return None
-
-
-def logout(session):
-    try:
-        # Logout is not strictly necessary as the session will expire, but it's good practice
-        logout_url = f'{QBITTORRENT_URL}/api/v2/auth/logout'
-        session.get(logout_url)
-    except:
-        pass
 
 
 def create_magnet_link_from_url(torrent_file_url) -> (str, bool, str):
@@ -127,4 +65,20 @@ def create_magnet_link_from_url(torrent_file_url) -> (str, bool, str):
 # Main
 if __name__ == '__main__':
     # Test
-    print(create_magnet_link_from_url('https://releases.ubuntu.com/23.10/ubuntu-23.10-live-server-amd64.iso.torrent'))
+    id_hash = add_torrent(
+     #   "magnet:?xt=urn:btih:15AAE9E49CC516C0F113F702B410BEAA42B2BCEB&tr=http%3A%2F%2Fbt4.t-ru.org%2Fann%3Fmagnet"
+    #   "magnet:?xt=urn:btih:3648baf850d5930510c1f172b534200ebb5496e6&dn=Ubuntu+24.04"
+       "magnet:?xt=urn:btih:AF86870A619EFB3EBB0887F48CB2261A3A2A6809&tr=http%3A%2F%2Fbt3.t-ru.org%2Fann%3Fmagnet"
+    )
+    print("Add torrent result: ")
+    pprint(id_hash)
+
+    info = get_info(id_hash)
+    print("Get info result: ")
+    pprint(info)
+
+    link = get_file_as_link(id_hash, 2)
+    print("Get first file link result: ")
+    pprint(link)
+
+# http://localhost:8090/stream/?link=15aae9e49cc516c0f113f702b410beaa42b2bceb&index=1&play
