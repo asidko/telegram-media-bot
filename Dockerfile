@@ -1,4 +1,4 @@
-FROM python:3.11-alpine
+FROM python:3.12-alpine
 
 # Creating Application Source Code Directory
 RUN mkdir -p /usr/src/app
