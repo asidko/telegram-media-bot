@@ -12,7 +12,7 @@ from cachetools import TTLCache
 
 from jackett import search_jackett
 from localization import localized
-from src.torrserver import get_cache
+from torrserver import get_cache
 from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, is_audio, get_file_icon
 from torrent_provider import get_torrent_info_by_magnet_link
 from torrserver import get_file, get_file_download_link
