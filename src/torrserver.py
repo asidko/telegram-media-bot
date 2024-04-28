@@ -10,6 +10,7 @@ dotenv.load_dotenv()
 
 torrserver_url = os.getenv("TORRSERVER_URL")
 
+
 def add_torrent(magnet_link) -> str:
     """
     Add a torrent to the client
@@ -61,6 +62,21 @@ def get_file(id: str, file_num: int) -> BytesIO:
     download_response.raise_for_status()  # Ensure we got a successful response
 
     return io.BytesIO(download_response.content)
+
+
+def get_cache(hash) -> dict:
+    url = torrserver_url + "/cache"
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "content-type": "application/json",
+    }
+    data = {
+        "action": "get",
+        "hash": hash
+    }
+    response = requests.post(url, headers=headers, json=data)
+    data = json.loads(response.text)
+    return data
 
 
 def get_file_download_link(hash, file_id) -> str:

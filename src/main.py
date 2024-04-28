@@ -5,15 +5,15 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from urllib.parse import urlparse, urlunparse
 
 import dotenv
 import telebot
 from cachetools import TTLCache
-from telebot.apihelper import ApiTelegramException
 
 from jackett import search_jackett
 from localization import localized
+from src.torrserver import get_cache
+from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, is_audio, get_file_icon
 from torrent_provider import get_torrent_info_by_magnet_link
 from torrserver import get_file, get_file_download_link
 from torrent import create_magnet_link_from_url
@@ -25,7 +25,6 @@ advertised_torrserver_host = os.getenv('ADVERTISED_TORRSERVER_HOST')
 
 results_cache = TTLCache(maxsize=10000, ttl=2_592_000)  # cache for 30 days
 
-MAX_QUERY_TEXT_LENGTH = 255
 WAIT_TIMEOUT_TO_NOTIFY_SECONDS = 15
 search_execution_times = deque(maxlen=5)
 
@@ -89,18 +88,32 @@ def file(message):
     if not magnet_link:
         pass
 
+    def keep_torrent_alive(hash):
+        def worker():
+            start_time = time.time()
+            while True:
+                if time.time() - start_time > 180:  # 180 seconds = 3 minutes
+                    break
+                get_cache(hash)
+                time.sleep(2)
+
+        threading.Thread(target=worker).start()
+
     def print_download_link(message, torrent_info, selected_file_id):
         hash = torrent_info.hash
         link = get_file_download_link(hash, selected_file_id)
         link = advertised_torrserver_host + remove_host_from_url(link)
-        file_title = next((f'<b>{os.path.basename(f.title)}</b> - {f.size}' for f in torrent_info.files if str(f.id) == selected_file_id), 'Unknown file')
-        text = f"🥂 Downloading\n{file_title}"
+        file_title = next((f'<code>{os.path.basename(f.title)}</code> - {f.size}' for f in torrent_info.files if
+                           str(f.id) == selected_file_id), 'Unknown file')
+        text = f"🥂{file_title}"
         text += f"\n<pre>{link}</pre>"
-        text += "\n<i>* Rename file after download if needed</i>"
-        text += "\n<i>** You can pass the links to the media players like VLC to stream the content directly</i>"
+        if is_video(file_title):
+            text += f"\n<i>* {localized(message, "paste_link_to_player_warning")}</i>"
+        text += f"\n<i>* {localized(message, "expire_link_warning")}</i>"
+        text += f"\n\n<i>* {localized(message, "rename_file_warning")}</i>"
         response = UserResponse(user_id=message.from_user.id,
                                 message=text,
-                                controls=[ResponseControl(title='Download', action_url=link)])
+                                controls=[ResponseControl(title=localized(message, "download"), action_url=link)])
         try:
             # Try with button
             say(response)
@@ -108,9 +121,10 @@ def file(message):
             # Try without button, if link in button fails
             say(dataclasses.replace(response, controls=[]))
 
+        keep_torrent_alive(hash)
 
-
-    get_torrent_info_by_magnet_link(magnet_link, lambda torrent_info: print_download_link(message,torrent_info, file_id))
+    get_torrent_info_by_magnet_link(magnet_link,
+                                    lambda torrent_info: print_download_link(message, torrent_info, file_id))
 
 
 @bot.message_handler(regexp="^/select")
@@ -156,23 +170,32 @@ def select(message):
 
     def edit_response_with_updated_data(current_response, message_id, query_key, item_key, torrent_info):
         new_message = current_response.message
-        new_message += f'\n\n🗂️Files in torrent:\n'
-        limit = 10
-        for f in torrent_info.files:
+        new_message += f'\n\n{localized(message, "files_in_torrent")}\n'
+        limit = 25
+        for file in torrent_info.files:
             if (limit := limit - 1) < 0:
                 new_message += '...'
                 break
-            new_message += f'/file_{query_key}_{item_key}_{f.id} ⤵	\n'
-            new_message += f'{f.title} - {f.size}\n'
+            file_title=os.path.basename(file.title)
+            file_icon = get_file_icon(file_title)
 
-        new_response = dataclasses.replace(current_response, message=new_message)
+            new_message += f'/file_{query_key}_{item_key}_{file.id} {file_icon} {file_title} - {file.size}\n'
+
+        new_response = dataclasses.replace(current_response, message=new_message, files=[])
+        say(new_response, message_id)
+
+    def edit_response_with_alert(current_response, message_id):
+        new_message = current_response.message
+        new_message += f'\n\n{localized(message, "torrent_info_not_found")}'
+        new_response = dataclasses.replace(current_response, message=new_message, files=[])
         say(new_response, message_id)
 
     get_torrent_info_by_magnet_link(magnet_link, lambda torrent_info: edit_response_with_updated_data(user_response,
                                                                                                       message_id,
                                                                                                       query_key,
                                                                                                       item_key,
-                                                                                                      torrent_info))
+                                                                                                      torrent_info),
+                                    lambda: edit_response_with_alert(user_response, message_id))
 
 
 def find_item_by_key(query_key, item_key):
@@ -240,6 +263,11 @@ def get_text_messages(message):
 
     print("Received message from: %s, text: %s" % (message.from_user.id, message.text))
 
+    isotime = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    user_id = message.from_user.id
+    user_login = message.from_user.username
+    write_to_query_log(f"{isotime} {user_id} {user_login} # {text}")
+
     say(UserResponse(
         user_id=message.from_user.id,
         message=localized(message, 'searching_for', text)
@@ -300,12 +328,6 @@ def threaded_search_jackett(text, message) -> list[dict]:
     return result
 
 
-def clean_text(text):
-    text = text[:MAX_QUERY_TEXT_LENGTH]
-    text = text.lower().strip()
-    return text
-
-
 def print_query_results(query_hash, message, results, title_to_show):
     def make_row(result):
         id = result.get('id')
@@ -354,13 +376,5 @@ def create_filter_controls(query_hash, message, results) -> list[ResponseControl
         controls.append(ResponseControl(title=localized(message, 'more_than_10_gb'),
                                         action_key=f"filter_more_size_10:{query_hash}"))
     return controls
-
-
-def remove_host_from_url(url) -> str:
-    parsed_url = urlparse(url)
-    # Create a new URL with the scheme and netloc set to empty
-    modified_url = parsed_url._replace(scheme='', netloc='')
-    # Construct the URL without the scheme and netloc
-    return str(urlunparse(modified_url))
 
 bot.infinity_polling(timeout=60, long_polling_timeout=2)
