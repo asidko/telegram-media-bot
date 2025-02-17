@@ -7,7 +7,7 @@ from typing import TypedDict
 import dotenv
 import requests
 
-from src.utils import download, fix_filename
+from utils import download, fix_filename
 
 dotenv.load_dotenv()
 

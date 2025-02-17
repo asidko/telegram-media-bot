@@ -12,12 +12,11 @@ from cachetools import TTLCache
 
 from jackett import search_jackett
 from localization import localized
-from src.torrserver import torrserver_get_info
-from src.utils import upload0x0, fix_filename, upload_anonfiles
-from torrserver import torrserver_get_file, torrserver_get_file_download_link
-from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, is_audio, get_file_icon, download
-from torrent_provider import get_torrent_info_by_magnet_link, TorrentInfo, TorrentFileInfo
+from utils import fix_filename, upload_anonfiles
 from torrent import create_magnet_link_from_url
+from torrent_provider import get_torrent_info_by_magnet_link, TorrentInfo, TorrentFileInfo
+from torrserver import torrserver_get_file, torrserver_get_file_download_link
+from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, get_file_icon, download
 
 # Load environment variables
 dotenv.load_dotenv()

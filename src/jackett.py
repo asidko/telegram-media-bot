@@ -1,13 +1,13 @@
+import hashlib
 import os
 import string
-from random import random, choice
+from random import choice
 
 import dotenv
 import humanize
 import requests
-from cachetools import cached, TTLCache
+from cachetools import cached
 from cachetools_ext.fs import FSLRUCache
-import hashlib
 
 dotenv.load_dotenv()
 

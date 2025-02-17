@@ -1,10 +1,10 @@
+import threading
 from dataclasses import dataclass, field
 from time import sleep
 from typing import Callable
 
-from utils import bytes_to_human_readable
 from torrserver import add_torrent, torrserver_get_info
-import threading
+from utils import bytes_to_human_readable
 
 
 @dataclass
