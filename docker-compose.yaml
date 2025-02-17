@@ -7,6 +7,7 @@ services:
       - .env # make sure to rename .env.example to .env and fix the values
     restart: always
 
+  # Check Swagger UI at http://localhost:8091/swagger/index.html
   torrserver:
     image: solopasha/torrserver:v134
     environment:

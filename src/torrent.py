@@ -6,7 +6,7 @@ import bencodepy
 import dotenv
 import requests
 
-from torrserver import add_torrent, get_info, get_file
+from torrserver import add_torrent, torrserver_get_info, torrserver_get_file
 
 dotenv.load_dotenv()
 
@@ -73,11 +73,11 @@ if __name__ == '__main__':
     print("Add torrent result: ")
     pprint(id_hash)
 
-    info = get_info(id_hash)
+    info = torrserver_get_info(id_hash)
     print("Get info result: ")
     pprint(info)
 
-    link = get_file(id_hash, 2)
+    link = torrserver_get_file(id_hash, 2)
     print("Get first file link result: ")
     pprint(link)
 

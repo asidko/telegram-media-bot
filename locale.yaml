@@ -18,8 +18,6 @@ en:
   download: "💾 Download"
   torrent_info_not_found: "⚠️ Couldn't fetch torrent information, maybe try another torrent."
   files_in_torrent: "🗂️Files in torrent:"
-  expire_link_warning: "The stream link will expire in 3 minutes if not used. Select the file again to renew."
-  rename_file_warning: "Rename the file after downloading to fix the extension."
   paste_link_to_player_warning: "Copy and paste the link to VLC player to play online."
 ru:
   start_message: "Привет! 👋 Я бот, который поможет вам найти торренты. Просто введите ваш запрос, а я сделаю всё остальное."
@@ -41,8 +39,6 @@ ru:
   download: "💾Загрузить"
   torrent_info_not_found: "⚠️ Не удалось подгрузить информацию о торренте, возможно стоит попробовать другую раздачу."
   files_in_torrent: "🗂Файлы в этой раздаче:"
-  expire_link_warning: "Ссылка на стрим устареет через 3 минуты если не будет использована. Выберите файл еще раз чтобы поновить."
-  rename_file_warning: "Переименуйте файл после загрузки, чтобы исправить расширение."
   paste_link_to_player_warning: "Скопируйте и вставьте ссылку в плеер VLC чтобы воспроизвести онлайн."
 uk:
   start_message: "Привіт! 👋 Я бот, який допоможе вам знайти торренти. Просто введіть ваш запит, а решта на мені."
@@ -64,6 +60,4 @@ uk:
   download: "💾 Завантажити"
   torrent_info_not_found: "⚠️ Не вдалося отримати інформацію про торрент, можливо варто спробувати інший."
   files_in_torrent: "🗂️Файли цієї роздачі:"
-  expire_link_warning: "Посилання на стрім застаріє через 3 хвилини якщо не буде використане. Виберіть файл ще раз щоб поновити."
-  rename_file_warning: "Переіменуйте файл після завантаження, щоб виправити розширення."
   paste_link_to_player_warning: "Скопіюйте та вставте посилання в плеєр VLC щоб дивитись онлайн."

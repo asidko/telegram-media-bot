@@ -3,7 +3,7 @@ from time import sleep
 from typing import Callable
 
 from utils import bytes_to_human_readable
-from torrserver import add_torrent, get_info
+from torrserver import add_torrent, torrserver_get_info
 import threading
 
 
@@ -33,7 +33,7 @@ def get_torrent_info_by_magnet_link(magnet_link,
         while attempt < max_attempts:
             attempt += 1
             print("Waiting for torrent info... Attempt %d" % attempt)
-            _tor_info = get_info(id_hash)
+            _tor_info = torrserver_get_info(id_hash)
             # Got some data
             if _tor_info is not None and _tor_info.get('Torrent') is not None:
                 tor_info = _tor_info['Torrent']
