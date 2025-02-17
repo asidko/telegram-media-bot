@@ -22,6 +22,7 @@ en:
   downloading_file: "Downloading a file: {}..."
   downloading_file_progress: "Downloading a file: {} {}%"
   uploading_to_telegram: "Uploading {} to Telegram..."
+  uploading_to_fileshare: "Uploading {} to fileshare..."
 ru:
   start_message: "Привет! 👋 Я бот, который поможет вам найти торренты. Просто введите ваш запрос, а я сделаю всё остальное."
   search_expired: "Результаты поиска устарели. Повторите поиск снова."
@@ -46,6 +47,7 @@ ru:
   downloading_file: "Загружаю файл: {}..."
   downloading_file_progress: "Загружаю файл: {} {}%"
   uploading_to_telegram: "Загружаю {} в Telegram..."
+  uploading_to_fileshare: "Загружаю {} на сервер..."
 uk:
   start_message: "Привіт! 👋 Я бот, який допоможе вам знайти торренти. Просто введіть ваш запит, а решта на мені."
   search_expired: "Результати пошуку застаріли. Будь ласка, спробуйте шукати знову."
@@ -70,3 +72,4 @@ uk:
   downloading_file: "Завантажую файл: {}..."
   downloading_file_progress: "Завантажую файл: {} {}%"
   uploading_to_telegram: "Завантажую {} в Telegram..."
+  uploading_to_fileshare: "Завантажую {} на сервер..."

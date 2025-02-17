@@ -7,7 +7,7 @@ from typing import TypedDict
 import dotenv
 import requests
 
-from src.utils import download
+from src.utils import download, fix_filename
 
 dotenv.load_dotenv()
 
@@ -98,12 +98,6 @@ def torrserver_get_file(hash: str, file_num: int) -> BytesIO:
     return download(link)
 
 def torrserver_get_file_download_link(hash, file_id) -> DownloadLinkInfo:
-    def fix_filename(filename: str) -> str:
-        """Fix the filename by replacing spaces, dots, and underscores with a dash and removing all other non-alphanumeric characters."""
-        # Split to file name and extension
-        filename, ext = os.path.splitext(filename)
-        return ''.join(c if c.isalnum() else '-' if c in ' ._' else '' for c in filename) + ext
-
     info = torrserver_get_info(hash)['Torrent']
     download_file = next(filter(lambda f: f['id'] == int(file_id), info['file_stats']), None)
     if not download_file:

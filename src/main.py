@@ -13,6 +13,7 @@ from cachetools import TTLCache
 from jackett import search_jackett
 from localization import localized
 from src.torrserver import torrserver_get_info
+from src.utils import upload0x0, fix_filename, upload_anonfiles
 from torrserver import torrserver_get_file, torrserver_get_file_download_link
 from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, is_audio, get_file_icon, download
 from torrent_provider import get_torrent_info_by_magnet_link, TorrentInfo, TorrentFileInfo
@@ -30,7 +31,8 @@ ADVERTISED_TORRSERVER_HOST = os.getenv('ADVERTISED_TORRSERVER_HOST')
 RESULTS_CACHE = TTLCache(maxsize=10000, ttl=2_592_000)  # 30 days
 WAIT_TIMEOUT_TO_NOTIFY_SECONDS = 15
 SEARCH_EXECUTION_TIMES = deque(maxlen=5)
-TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB = int(os.getenv('TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB', 2000))
+TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB = int(os.getenv('TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB', 50))
+FILESHARE_UPLOAD_LIMIT_MB= int(os.getenv('FILESHARE_UPLOAD_LIMIT_MB', 500))
 
 
 def get_average_search_execution_time() -> int:
@@ -53,6 +55,7 @@ class ResponseControl:
 @dataclass
 class ResponseFile:
     file_name: str = ""
+    caption: str = ""
     file_bytes: bytes = b""
 
 
@@ -91,7 +94,7 @@ def say(response: UserResponse, message_id_to_edit: int = None) -> int:
 
     for file in response.files:
         if file.file_bytes:
-            bot.send_document(response.user_id, file.file_bytes, visible_file_name=file.file_name)
+            bot.send_document(response.user_id, file.file_bytes, visible_file_name=file.file_name, caption=file.caption)
 
     return message_obj.message_id
 
@@ -236,7 +239,14 @@ def handle_file_command(message):
         if can_upload_to_telegram:
             controls.append(ResponseControl(
                 title=localized(message, '📩 Download to this chat'),
-                action_key=f'telegram_download:{torrent_hash},{selected_file_id}'
+                action_key=f'download_telegram:{torrent_hash},{selected_file_id}'
+            ))
+
+        can_fileshare_upload = download_file.size_bytes < FILESHARE_UPLOAD_LIMIT_MB * 1024 ** 2
+        if can_fileshare_upload:
+            controls.append(ResponseControl(
+                title=localized(message, '📩 Download to fileshare'),
+                action_key=f'download_fileshare:{torrent_hash},{selected_file_id}'
             ))
 
         response = UserResponse(
@@ -302,7 +312,7 @@ def handle_select_command(message):
             title=localized(message, 'magnet_link'),
             action_url=f'https://asidko.github.io/html-render/?title=Download%20link&content={html_hex}'
         )],
-        files=[ResponseFile(file_name=f'{title}.torrent', file_bytes=torrent_file_bytes)]
+        files=[ResponseFile(file_name=f'{fix_filename(title)}.torrent', caption=title, file_bytes=torrent_file_bytes)]
     )
     message_id = say(user_response)
 
@@ -334,8 +344,8 @@ def handle_select_command(message):
     )
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('telegram_download:'))
-def handle_telegram_download_callback_query(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith('download_'))
+def handle_download_telegram_callback_query(call):
     """Handle the callback query for downloading a file to the chat."""
     command, args = call.data.split(':')
     torrent_hash, file_id = args.split(',')
@@ -359,12 +369,25 @@ def handle_telegram_download_callback_query(call):
 
     file_bytes = download(link_info.link, update_progress)
 
-    uploading_tg_msg_id = say(UserResponse(
-        user_id=call.from_user.id,
-        message=localized(call, 'uploading_to_telegram', link_info.file_name),
-    ))
-    bot.send_document(call.from_user.id, file_bytes, visible_file_name=f'{link_info.file_name}', caption=f'{link_info.torrent_name}', timeout=3600)
-    bot.delete_messages(call.from_user.id, [progress_msg_id, uploading_tg_msg_id])
+    if command == 'download_telegram':
+        uploading_tg_msg_id = say(UserResponse(
+            user_id=call.from_user.id,
+            message=localized(call, 'uploading_to_telegram', link_info.file_name),
+        ))
+        bot.send_document(call.from_user.id, file_bytes, visible_file_name=f'{link_info.file_name}', caption=f'{link_info.torrent_name}', timeout=3600)
+        bot.delete_message(call.from_user.id, uploading_tg_msg_id)
+    elif command == 'download_fileshare':
+        uploading_tg_msg_id = say(UserResponse(
+            user_id=call.from_user.id,
+            message=localized(call, 'uploading_to_fileshare', link_info.file_name),
+        ))
+        link = upload_anonfiles(file_bytes, link_info.file_name)
+        say(UserResponse(
+            user_id=call.from_user.id,
+            message=localized(call, f":👉 {link}\n📄️<b>{link_info.file_name}</b>\n<i>{link_info.torrent_name}</i>"),))
+        bot.delete_message(call.from_user.id, uploading_tg_msg_id)
+
+    bot.delete_message(call.from_user.id, progress_msg_id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('filter_'))
 def handle_filter_callback_query(call):
