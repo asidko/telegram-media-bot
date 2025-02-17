@@ -12,6 +12,7 @@ class TorrentFileInfo:
     id: str
     title: str
     size: str
+    size_bytes: int
 
 
 @dataclass
@@ -55,6 +56,7 @@ def get_torrent_info_by_magnet_link(magnet_link,
             torrent_info.files.append(TorrentFileInfo(
                 id=file.get('id'),
                 title=file.get('path'),
+                size_bytes=file.get('length'),
                 size=bytes_to_human_readable(file.get('length'))
             ))
         callback(torrent_info)

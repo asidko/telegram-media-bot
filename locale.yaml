@@ -19,6 +19,9 @@ en:
   torrent_info_not_found: "⚠️ Couldn't fetch torrent information, maybe try another torrent."
   files_in_torrent: "🗂️Files in torrent:"
   paste_link_to_player_warning: "Copy and paste the link to VLC player to play online."
+  downloading_file: "Downloading a file: {}..."
+  downloading_file_progress: "Downloading a file: {} {}%"
+  uploading_to_telegram: "Uploading {} to Telegram..."
 ru:
   start_message: "Привет! 👋 Я бот, который поможет вам найти торренты. Просто введите ваш запрос, а я сделаю всё остальное."
   search_expired: "Результаты поиска устарели. Повторите поиск снова."
@@ -40,6 +43,9 @@ ru:
   torrent_info_not_found: "⚠️ Не удалось подгрузить информацию о торренте, возможно стоит попробовать другую раздачу."
   files_in_torrent: "🗂Файлы в этой раздаче:"
   paste_link_to_player_warning: "Скопируйте и вставьте ссылку в плеер VLC чтобы воспроизвести онлайн."
+  downloading_file: "Загружаю файл: {}..."
+  downloading_file_progress: "Загружаю файл: {} {}%"
+  uploading_to_telegram: "Загружаю {} в Telegram..."
 uk:
   start_message: "Привіт! 👋 Я бот, який допоможе вам знайти торренти. Просто введіть ваш запит, а решта на мені."
   search_expired: "Результати пошуку застаріли. Будь ласка, спробуйте шукати знову."
@@ -61,3 +67,6 @@ uk:
   torrent_info_not_found: "⚠️ Не вдалося отримати інформацію про торрент, можливо варто спробувати інший."
   files_in_torrent: "🗂️Файли цієї роздачі:"
   paste_link_to_player_warning: "Скопіюйте та вставте посилання в плеєр VLC щоб дивитись онлайн."
+  downloading_file: "Завантажую файл: {}..."
+  downloading_file_progress: "Завантажую файл: {} {}%"
+  uploading_to_telegram: "Завантажую {} в Telegram..."

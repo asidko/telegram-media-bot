@@ -14,8 +14,8 @@ from jackett import search_jackett
 from localization import localized
 from src.torrserver import torrserver_get_info
 from torrserver import torrserver_get_file, torrserver_get_file_download_link
-from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, is_audio, get_file_icon
-from torrent_provider import get_torrent_info_by_magnet_link, TorrentInfo
+from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, is_audio, get_file_icon, download
+from torrent_provider import get_torrent_info_by_magnet_link, TorrentInfo, TorrentFileInfo
 from torrent import create_magnet_link_from_url
 
 # Load environment variables
@@ -30,6 +30,7 @@ ADVERTISED_TORRSERVER_HOST = os.getenv('ADVERTISED_TORRSERVER_HOST')
 RESULTS_CACHE = TTLCache(maxsize=10000, ttl=2_592_000)  # 30 days
 WAIT_TIMEOUT_TO_NOTIFY_SECONDS = 15
 SEARCH_EXECUTION_TIMES = deque(maxlen=5)
+TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB = int(os.getenv('TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB', 2000))
 
 
 def get_average_search_execution_time() -> int:
@@ -133,6 +134,7 @@ def create_filter_controls(query_hash: str, message, results: list[dict]) -> lis
 
 def print_query_results(query_hash: str, message, results: list[dict], title_to_show: str) -> None:
     """Format and send the query results with optional filter controls."""
+
     def make_row(result: dict) -> str:
         item_id = result.get('id')
         title = result.get('title')
@@ -184,6 +186,7 @@ def handle_test_upload(message):
     print("Sending file")
     bot.send_document(message.from_user.id, file_bytes, visible_file_name='test')
 
+
 @bot.message_handler(regexp="^/file")
 def handle_file_command(message):
     """Process the /file command to send a download link for a specific file."""
@@ -213,23 +216,39 @@ def handle_file_command(message):
 
     def send_download_link(torrent_info: TorrentInfo, selected_file_id: str) -> None:
         torrent_hash = torrent_info.hash
-        download_link = torrserver_get_file_download_link(torrent_hash, selected_file_id)
-        full_link = ADVERTISED_TORRSERVER_HOST + remove_host_from_url(download_link)
-        file_title = next(
-            (f'<code>{os.path.basename(f.title)}</code> - {f.size}' for f in torrent_info.files if str(f.id) == selected_file_id),
-            'Unknown file'
-        )
+
+        download_file: TorrentFileInfo = next(filter(lambda f: f.id == int(selected_file_id), torrent_info.files), None)
+        if not download_file:
+            say(UserResponse(user_id=message.from_user.id, message=localized(message, 'search_expired')))
+
+        download_link_info = torrserver_get_file_download_link(torrent_hash, selected_file_id)
+        full_link = ADVERTISED_TORRSERVER_HOST + remove_host_from_url(download_link_info.link)
+        file_title = f'<code>{os.path.basename(download_file.title)}</code> - {download_file.size}'
         text = f"🥂{file_title}\n<pre>{full_link}</pre>"
         if is_video(file_title):
             text += f"\n<i>* {localized(message, 'paste_link_to_player_warning')}</i>"
+
+        controls = [
+            ResponseControl(title=localized(message, 'download'), action_url=full_link)
+        ]
+
+        can_upload_to_telegram = download_file.size_bytes < TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB * 1024 ** 2
+        if can_upload_to_telegram:
+            controls.append(ResponseControl(
+                title=localized(message, '📩 Download to this chat'),
+                action_key=f'telegram_download:{torrent_hash},{selected_file_id}'
+            ))
+
         response = UserResponse(
             user_id=message.from_user.id,
             message=text,
-            controls=[ResponseControl(title=localized(message, 'download'), action_url=full_link)]
+            controls=controls
         )
+
         try:
             say(response)
         except Exception as e:
+            print(f"Error showing download button: {e}")
             # Fallback without button controls
             say(dataclasses.replace(response, controls=[]))
 
@@ -269,7 +288,8 @@ def handle_select_command(message):
     # Generate magnet link from torrent if necessary
     magnet_link_from_torrent, is_torrent_file_present, torrent_file_content = create_magnet_link_from_url(torrent_link)
     if torrent_link and not magnet_link:
-        magnet_link = magnet_link_from_torrent if magnet_link_from_torrent else localized(message, 'missing_magnet_link')
+        magnet_link = magnet_link_from_torrent if magnet_link_from_torrent else localized(message,
+                                                                                          'missing_magnet_link')
     selected_result["magnet_calculated"] = magnet_link
 
     torrent_file_bytes = torrent_file_content if is_torrent_file_present else None
@@ -286,7 +306,8 @@ def handle_select_command(message):
     )
     message_id = say(user_response)
 
-    def edit_response_with_updated_data(current_response: UserResponse, msg_id: int, q_key: str, i_key: str, torrent_info) -> None:
+    def edit_response_with_updated_data(current_response: UserResponse, msg_id: int, q_key: str, i_key: str,
+                                        torrent_info) -> None:
         new_message = current_response.message + f'\n\n{localized(message, "files_in_torrent")}\n'
         limit = 25
         for file in torrent_info.files:
@@ -307,13 +328,46 @@ def handle_select_command(message):
 
     get_torrent_info_by_magnet_link(
         magnet_link,
-        lambda torrent_info: edit_response_with_updated_data(user_response, message_id, query_key, item_key, torrent_info),
+        lambda torrent_info: edit_response_with_updated_data(user_response, message_id, query_key, item_key,
+                                                             torrent_info),
         lambda: edit_response_with_alert(user_response, message_id)
     )
 
 
-@bot.callback_query_handler(func=lambda call: True)
-def handle_callback_query(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith('telegram_download:'))
+def handle_telegram_download_callback_query(call):
+    """Handle the callback query for downloading a file to the chat."""
+    command, args = call.data.split(':')
+    torrent_hash, file_id = args.split(',')
+
+    link_info = torrserver_get_file_download_link(torrent_hash, file_id)
+    progress_msg_id = say(UserResponse(
+        user_id=call.from_user.id,
+        message=localized(call, 'downloading_file', link_info.file_name)))
+
+    last_notified_progress = 0
+    def update_progress(progress: int):
+        nonlocal last_notified_progress
+        is_large_size = link_info.size_bytes > 200 * 1024 ** 2
+        if not is_large_size and (progress - last_notified_progress) < 10:
+            return
+        last_notified_progress = progress
+        say(UserResponse(
+            user_id=call.from_user.id,
+            message=localized(call, 'downloading_file_progress', link_info.file_name, progress),
+        ), progress_msg_id)
+
+    file_bytes = download(link_info.link, update_progress)
+
+    uploading_tg_msg_id = say(UserResponse(
+        user_id=call.from_user.id,
+        message=localized(call, 'uploading_to_telegram', link_info.file_name),
+    ))
+    bot.send_document(call.from_user.id, file_bytes, visible_file_name=f'{link_info.file_name}', caption=f'{link_info.torrent_name}', timeout=3600)
+    bot.delete_messages(call.from_user.id, [progress_msg_id, uploading_tg_msg_id])
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('filter_'))
+def handle_filter_callback_query(call):
     """Handle button callback queries for filtering results."""
     command, query_hash = call.data.split(':')
     results = RESULTS_CACHE.get(query_hash, [])
@@ -325,15 +379,15 @@ def handle_callback_query(call):
 
     if command == "filter_less_size_2":
         title = localized(call, 'filter_less_than_2gb')
-        filtered_results = [r for r in results if r.get('size_bytes', 0) < 2 * 1024**3]
+        filtered_results = [r for r in results if r.get('size_bytes', 0) < 2 * 1024 ** 3]
         print_query_results(query_hash, call, filtered_results, title)
     elif command == "filter_more_size_4":
         title = localized(call, 'filter_more_than_4gb')
-        filtered_results = [r for r in results if r.get('size_bytes', 0) > 4 * 1024**3]
+        filtered_results = [r for r in results if r.get('size_bytes', 0) > 4 * 1024 ** 3]
         print_query_results(query_hash, call, filtered_results, title)
     elif command == "filter_more_size_10":
         title = localized(call, 'filter_more_than_10gb')
-        filtered_results = [r for r in results if r.get('size_bytes', 0) > 10 * 1024**3]
+        filtered_results = [r for r in results if r.get('size_bytes', 0) > 10 * 1024 ** 3]
         print_query_results(query_hash, call, filtered_results, title)
 
 

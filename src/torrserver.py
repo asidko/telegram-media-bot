@@ -1,11 +1,13 @@
-import io
 import json
 import os
+from dataclasses import dataclass
 from io import BytesIO
 from typing import TypedDict
 
 import dotenv
 import requests
+
+from src.utils import download
 
 dotenv.load_dotenv()
 
@@ -42,6 +44,13 @@ class TorrserverTorrentResponseBody(TypedDict):
     PiecesCount: int
     Torrent: TorrserverTorrent
 
+@dataclass
+class DownloadLinkInfo:
+    link: str
+    file_name: str
+    size_bytes: int
+    torrent_name: str
+
 def add_torrent(magnet_link) -> str:
     """
     Add a torrent to the client
@@ -69,7 +78,7 @@ def add_torrent(magnet_link) -> str:
     return data['hash']
 
 
-def torrserver_get_info(id: str) -> TorrserverTorrentResponseBody:
+def torrserver_get_info(hash: str) -> TorrserverTorrentResponseBody:
     url = torrserver_url + "/cache"
     headers = {
         "accept": "application/json",
@@ -77,35 +86,34 @@ def torrserver_get_info(id: str) -> TorrserverTorrentResponseBody:
     }
     data = {
         "action": "get",
-        "hash": id
+        "hash": hash
     }
     response = requests.post(url, headers=headers, json=data)
     data = json.loads(response.text)
     return data
 
-
-def torrserver_get_file(id: str, file_num: int) -> BytesIO:
+def torrserver_get_file(hash: str, file_num: int) -> BytesIO:
     # http://localhost:8090/play/<hash_id>/<file_id>
+    link = torrserver_get_file_download_link(hash, file_num).link
+    return download(link)
 
-    url = torrserver_get_file_download_link(file_num, id)
-
-    download_response = requests.get(url, stream=True)
-    download_response.raise_for_status()  # Ensure we got a successful response
-
-    return io.BytesIO(download_response.content)
-
-def torrserver_get_file_download_link(hash, file_id) -> str:
+def torrserver_get_file_download_link(hash, file_id) -> DownloadLinkInfo:
     def fix_filename(filename: str) -> str:
         """Fix the filename by replacing spaces, dots, and underscores with a dash and removing all other non-alphanumeric characters."""
         # Split to file name and extension
         filename, ext = os.path.splitext(filename)
         return ''.join(c if c.isalnum() else '-' if c in ' ._' else '' for c in filename) + ext
 
-    info = torrserver_get_info(hash)
-    download_file = next(filter(lambda f: f['id'] == int(file_id), info['Torrent']['file_stats']), None)
-    download_file_name = fix_filename(os.path.basename(download_file['path'])) if download_file else file_id
+    info = torrserver_get_info(hash)['Torrent']
+    download_file = next(filter(lambda f: f['id'] == int(file_id), info['file_stats']), None)
+    if not download_file:
+        raise ValueError(f"File with id {file_id} not found in the torrent. Can't get download link.")
 
-    return f"{torrserver_url}/stream/{download_file_name}?link={hash}&index={file_id}&play"
+    download_file_name = fix_filename(os.path.basename(download_file['path']))
+    size_bytes = download_file['length']
+    link = f"{torrserver_url}/stream/{download_file_name}?link={hash}&index={file_id}&play"
+
+    return DownloadLinkInfo(link=link, file_name=download_file_name, torrent_name=info['title'], size_bytes=size_bytes)
 
 
 
