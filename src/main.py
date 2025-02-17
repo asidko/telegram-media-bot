@@ -108,7 +108,7 @@ def file(message):
         text = f"🥂{file_title}"
         text += f"\n<pre>{link}</pre>"
         if is_video(file_title):
-            text += f"\n<i>* {localized(message, "paste_link_to_player_warning")}</i>"
+            text += f"\n<i>* {localized(message, 'paste_link_to_player_warning')}</i>"
         text += f"\n<i>* {localized(message, "expire_link_warning")}</i>"
         text += f"\n\n<i>* {localized(message, "rename_file_warning")}</i>"
         response = UserResponse(user_id=message.from_user.id,
@@ -293,7 +293,11 @@ def threaded_search_jackett(text, message) -> list[dict]:
 
     def run_search():
         nonlocal result
-        result = search_jackett(text)
+        try:
+            result = search_jackett(text)
+        except Exception as e:
+            # Log the exception (or use the logging module)
+            print(f"Error during search: {e}")
 
     search_thread = threading.Thread(target=run_search)
     search_thread.start()
@@ -317,9 +321,7 @@ def threaded_search_jackett(text, message) -> list[dict]:
 
     alert_thread = threading.Thread(target=say_warning)
     alert_thread.start()
-
     search_thread.join()
-    alert_thread.join()
 
     end_time_seconds = time.time() - start_time
     if end_time_seconds >= 5:  # ignore fast cached searches
@@ -377,4 +379,5 @@ def create_filter_controls(query_hash, message, results) -> list[ResponseControl
                                         action_key=f"filter_more_size_10:{query_hash}"))
     return controls
 
-bot.infinity_polling(timeout=60, long_polling_timeout=2)
+if __name__ == "__main__":
+    bot.infinity_polling(timeout=60, long_polling_timeout=2)
