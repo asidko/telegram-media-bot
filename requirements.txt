@@ -6,3 +6,4 @@ PyYAML~=6.0.1
 cachetools~=5.3.3
 pyTelegramBotAPI~=4.20.0
 requests-toolbelt~=1.0.0
+cachetools-ext~=0.0.8
