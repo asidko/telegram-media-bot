@@ -14,7 +14,7 @@ dotenv.load_dotenv()
 JACKETT_SERVER_URL = os.getenv('JACKETT_SERVER_URL')
 JACKETT_API_KEY = os.getenv('JACKETT_API_KEY')
 
-cache = FSLRUCache(maxsize=50, ttl=900)  # cahce for 15 minutes (900 seconds)
+cache = FSLRUCache(maxsize=500, ttl=3600)  # disk cache (./cache folder)
 
 
 @cached(cache, key=lambda query: hashlib.md5(query.encode()).hexdigest())

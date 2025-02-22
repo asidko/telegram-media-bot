@@ -46,10 +46,10 @@ class TorrserverTorrentResponseBody(TypedDict):
 
 @dataclass
 class DownloadLinkInfo:
-    link: str
-    file_name: str
-    size_bytes: int
-    torrent_name: str
+    link: str = ""
+    file_name: str = ""
+    size_bytes: int = 0
+    torrent_name: str = ""
 
 def add_torrent(magnet_link) -> str:
     """
@@ -98,7 +98,12 @@ def torrserver_get_file(hash: str, file_num: int) -> BytesIO:
     return download(link)
 
 def torrserver_get_file_download_link(hash, file_id) -> DownloadLinkInfo:
-    info = torrserver_get_info(hash)['Torrent']
+    try:
+        info = torrserver_get_info(hash)['Torrent']
+    except Exception as e:
+        print("Can't get the torrent details by hash: " + hash + ". Details: " + e.__str__())
+        return DownloadLinkInfo(link="")
+
     download_file = next(filter(lambda f: f['id'] == int(file_id), info['file_stats']), None)
     if not download_file:
         raise ValueError(f"File with id {file_id} not found in the torrent. Can't get download link.")

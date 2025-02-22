@@ -9,10 +9,12 @@ from dataclasses import dataclass, field
 import dotenv
 import telebot
 from cachetools import TTLCache
+from cachetools_ext.fs import FSLRUCache
 
 from jackett import search_jackett
 from localization import localized
-from utils import fix_filename, upload_anonfiles
+from fileshare import upload_anonfiles
+from utils import fix_filename
 from torrent import create_magnet_link_from_url
 from torrent_provider import get_torrent_info_by_magnet_link, TorrentInfo, TorrentFileInfo
 from torrserver import torrserver_get_file, torrserver_get_file_download_link
@@ -22,16 +24,16 @@ from utils import write_to_query_log, clean_text, remove_host_from_url, is_video
 dotenv.load_dotenv()
 
 # Initialize bot and global configuration
-BOT_TOKEN = os.getenv('BOT_TOKEN')
-bot = telebot.TeleBot(BOT_TOKEN)
-ADVERTISED_TORRSERVER_HOST = os.getenv('ADVERTISED_TORRSERVER_HOST')
+bot = telebot.TeleBot(os.getenv('BOT_TOKEN'))
 
-# Global cache and constants
-RESULTS_CACHE = TTLCache(maxsize=10000, ttl=2_592_000)  # 30 days
+# Global cache
+results_cache = FSLRUCache(maxsize=10000, ttl=2_592_000)  # 30 days
+# Params
 WAIT_TIMEOUT_TO_NOTIFY_SECONDS = 15
 SEARCH_EXECUTION_TIMES = deque(maxlen=5)
+ADVERTISED_TORRSERVER_HOST = os.getenv('ADVERTISED_TORRSERVER_HOST')
 TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB = int(os.getenv('TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB', 50))
-FILESHARE_UPLOAD_LIMIT_MB= int(os.getenv('FILESHARE_UPLOAD_LIMIT_MB', 500))
+FILESHARE_UPLOAD_LIMIT_MB = int(os.getenv('FILESHARE_UPLOAD_LIMIT_MB', 500))
 
 
 def get_average_search_execution_time() -> int:
@@ -100,7 +102,7 @@ def say(response: UserResponse, message_id_to_edit: int = None) -> int:
 
 def find_item_by_key(query_key: str, item_key: str) -> dict | None:
     """Retrieve an item from the cache based on query and item keys."""
-    results = RESULTS_CACHE.get(query_key, [])
+    results = results_cache.get(query_key, [])
     return next((result for result in results if result.get('id') == item_key), None)
 
 
@@ -209,7 +211,10 @@ def handle_file_command(message):
             message=localized(message, 'option_not_found')
         ))
 
-    magnet_link = selected_result.get("magnet_calculated")
+    magnet_link = selected_result.get("magnet_calculated") or selected_result.get("magnet")
+    if not magnet_link and selected_result.get('torrent'):
+        magnet_link, _, _ = create_magnet_link_from_url(selected_result.get('torrent'))
+
     if not magnet_link:
         return say(UserResponse(
             user_id=message.from_user.id,
@@ -350,49 +355,77 @@ def handle_download_telegram_callback_query(call):
     torrent_hash, file_id = args.split(',')
 
     link_info = torrserver_get_file_download_link(torrent_hash, file_id)
+    if not link_info.link:
+        say(UserResponse(user_id=call.from_user.id, message=localized(call, 'option_not_found')))
+        return
+
     progress_msg_id = say(UserResponse(
         user_id=call.from_user.id,
         message=localized(call, 'downloading_file', link_info.file_name)))
 
-    last_notified_progress = 0
-    def update_progress(progress: int):
-        nonlocal last_notified_progress
+    last_notified_download_progress = 0
+
+    def update_download_progress(progress: int):
+        nonlocal last_notified_download_progress
         is_large_size = link_info.size_bytes > 200 * 1024 ** 2
-        if not is_large_size and (progress - last_notified_progress) < 10:
+        if not is_large_size and (progress - last_notified_download_progress) < 10:
             return
-        last_notified_progress = progress
+        last_notified_download_progress = progress
         say(UserResponse(
             user_id=call.from_user.id,
             message=localized(call, 'downloading_file_progress', link_info.file_name, progress),
         ), progress_msg_id)
 
-    file_bytes = download(link_info.link, update_progress)
+    file_bytes = download(link_info.link, update_download_progress)
 
     if command == 'download_telegram':
-        uploading_tg_msg_id = say(UserResponse(
+        upload_mgs_id = say(UserResponse(
             user_id=call.from_user.id,
             message=localized(call, 'uploading_to_telegram', link_info.file_name),
         ))
-        bot.send_document(call.from_user.id, file_bytes, visible_file_name=f'{link_info.file_name}', caption=f'{link_info.torrent_name}', timeout=3600)
-        bot.delete_message(call.from_user.id, uploading_tg_msg_id)
+        bot.send_document(call.from_user.id, file_bytes, visible_file_name=f'{link_info.file_name}',
+                          caption=f'{link_info.torrent_name}', timeout=3600)
+        bot.delete_message(call.from_user.id, upload_mgs_id)
     elif command == 'download_fileshare':
-        uploading_tg_msg_id = say(UserResponse(
+        upload_mgs_id = say(UserResponse(
             user_id=call.from_user.id,
-            message=localized(call, 'uploading_to_fileshare', link_info.file_name),
+            message=localized(call, 'uploading_file', link_info.file_name),
         ))
-        link = upload_anonfiles(file_bytes, link_info.file_name)
-        say(UserResponse(
-            user_id=call.from_user.id,
-            message=localized(call, f":👉 {link}\n📄️<b>{link_info.file_name}</b>\n<i>{link_info.torrent_name}</i>"),))
-        bot.delete_message(call.from_user.id, uploading_tg_msg_id)
+
+        last_notified_upload_progress = 0
+
+        def update_upload_progress(progress: int):
+            nonlocal last_notified_upload_progress
+            is_large_size = link_info.size_bytes > 200 * 1024 ** 2
+            if not is_large_size and (progress - last_notified_upload_progress) < 10:
+                return
+            last_notified_upload_progress = progress
+            say(UserResponse(
+                user_id=call.from_user.id,
+                message=localized(call, 'uploading_file_progress', link_info.file_name, progress),
+            ), upload_mgs_id)
+
+        link = upload_anonfiles(file_bytes, link_info.file_name, update_upload_progress)
+        if link:
+            say(UserResponse(
+                user_id=call.from_user.id,
+                message=localized(call,
+                                  f"✅<b>{link_info.file_name}</b>\n Download link: {link}\n\n<i>{link_info.torrent_name}</i>"), ))
+        else:
+            say(UserResponse(
+                user_id=call.from_user.id,
+                message=localized(call, 'uploading_failed', link_info.file_name)))
+
+        bot.delete_message(call.from_user.id, upload_mgs_id)
 
     bot.delete_message(call.from_user.id, progress_msg_id)
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('filter_'))
 def handle_filter_callback_query(call):
     """Handle button callback queries for filtering results."""
     command, query_hash = call.data.split(':')
-    results = RESULTS_CACHE.get(query_hash, [])
+    results = results_cache.get(query_hash, [])
     if not results:
         return say(UserResponse(
             user_id=call.from_user.id,
@@ -430,7 +463,7 @@ def handle_text_message(message):
     cleaned_text = clean_text(message.text)
     results = threaded_search_jackett(cleaned_text, message)
     query_hash = hashlib.md5(cleaned_text.encode()).hexdigest().upper()[:6]
-    RESULTS_CACHE[query_hash] = results
+    results_cache[query_hash] = results
 
     if not results:
         return say(UserResponse(
@@ -480,4 +513,5 @@ def threaded_search_jackett(text: str, message) -> list[dict]:
 
 
 if __name__ == "__main__":
+    print("-------------\nThe app was started\n-------------")
     bot.infinity_polling(timeout=60, long_polling_timeout=2)

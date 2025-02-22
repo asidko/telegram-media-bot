@@ -94,44 +94,6 @@ def download(url: str, progress_callback: Optional[Callable[[int], None]] = None
     buffer.seek(0)
     return buffer
 
-
-def upload0x0(file_bytes: io.BytesIO, filename: str) -> str:
-    file_bytes.seek(0)
-    files = {'file': (filename, file_bytes)}
-    response = requests.post("https://0x0.st", files=files)
-    if response.status_code == 403:
-        # If 403 zip and try again
-        zipped_bytes = io.BytesIO()
-        with zipfile.ZipFile(zipped_bytes, "w", zipfile.ZIP_DEFLATED) as zipf:
-            file_bytes.seek(0)
-            zipf.writestr(filename, file_bytes.read())
-        zipped_bytes.seek(0)
-        files = {'file': (f"{filename}.zip", zipped_bytes)}
-        response = requests.post("https://0x0.st", files=files)
-    response.raise_for_status()
-    return response.text.strip()
-
-
-
-def upload_anonfiles(file_bytes: io.BytesIO, filename: str) -> str:
-    allowed = {".zip", ".rar", ".jpg", ".jpeg", ".png", ".gif"}
-    _, ext = os.path.splitext(filename)
-    if ext.lower() not in allowed:
-        z = io.BytesIO()
-        with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zf:
-            file_bytes.seek(0)
-            zf.writestr(filename, file_bytes.read())
-        z.seek(0)
-        filename += ".zip"
-        file_bytes = z
-    file_bytes.seek(0)
-    r = requests.post("https://www.anonfile.la/process/upload_file", files={"file": (filename, file_bytes)})
-    r.raise_for_status()
-    d = r.json()
-    if not d.get("success"):
-        raise Exception("Upload failed: " + d.get("message", "Unknown error"))
-    return d["url"].strip()
-
 def fix_filename(filename: str) -> str:
     """Fix the filename by replacing spaces, dots, and underscores with a dash and removing all other non-alphanumeric characters."""
     # Split to file name and extension
