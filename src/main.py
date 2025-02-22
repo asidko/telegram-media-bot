@@ -1,5 +1,6 @@
 import dataclasses
 import hashlib
+import io
 import os
 import threading
 import time
@@ -376,15 +377,16 @@ def handle_download_telegram_callback_query(call):
             message=localized(call, 'downloading_file_progress', link_info.file_name, progress),
         ), progress_msg_id)
 
-    file_bytes = download(link_info.link, update_download_progress)
+    file_path = download(link_info.link, update_download_progress)
 
     if command == 'download_telegram':
         upload_mgs_id = say(UserResponse(
             user_id=call.from_user.id,
             message=localized(call, 'uploading_to_telegram', link_info.file_name),
         ))
-        bot.send_document(call.from_user.id, file_bytes, visible_file_name=f'{link_info.file_name}',
-                          caption=f'{link_info.torrent_name}', timeout=3600)
+        with open(file_path, 'rb') as file:
+            bot.send_document(call.from_user.id, file, visible_file_name=f'{link_info.file_name}',
+                              caption=f'{link_info.torrent_name}', timeout=3600)
         bot.delete_message(call.from_user.id, upload_mgs_id)
     elif command == 'download_fileshare':
         upload_mgs_id = say(UserResponse(
@@ -405,7 +407,7 @@ def handle_download_telegram_callback_query(call):
                 message=localized(call, 'uploading_file_progress', link_info.file_name, progress),
             ), upload_mgs_id)
 
-        link = upload_anonfiles(file_bytes, link_info.file_name, update_upload_progress)
+        link = upload_anonfiles(file_path, link_info.file_name, update_upload_progress)
         if link:
             say(UserResponse(
                 user_id=call.from_user.id,

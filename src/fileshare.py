@@ -1,5 +1,6 @@
 import io
 import os
+import tempfile
 import zipfile
 import requests
 from typing import Callable, Optional
@@ -52,60 +53,58 @@ import zipfile
 import requests
 from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
 
-def upload_anonfiles(file_bytes: io.BytesIO, filename: str, callback=lambda percent: None) -> str:
+
+def upload_anonfiles(file_path: str, filename: str, callback: Callable[[int], None] = lambda p: None) -> str:
     allowed = {".zip", ".rar", ".jpg", ".jpeg", ".png", ".gif"}
     _, ext = os.path.splitext(filename)
+    temp_zip_file = None
+
+    # If the provided filename's extension is not allowed, create a temporary ZIP file.
     if ext.lower() not in allowed:
-        # Create a ZIP file if the extension isn't allowed
-        z = io.BytesIO()
-        with zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as zf:
-            file_bytes.seek(0)
-            zf.writestr(filename, file_bytes.read())
-        z.seek(0)
+        temp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        temp_zip_file = temp.name
+        temp.close()  # Close so zipfile can write to it.
+        with zipfile.ZipFile(temp_zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(file_path, arcname=filename)
         filename += ".zip"
-        file_bytes = z
+        file_obj = open(temp_zip_file, "rb")
+    else:
+        file_obj = open(file_path, "rb")
 
-    file_bytes.seek(0)
-
-    # Callback function to track the progress of the upload
-    # Store last reported percent in a mutable container
+    file_obj.seek(0)
     last_percent = 0
 
     def progress_callback(monitor):
         nonlocal last_percent
-        percent = int((monitor.bytes_read / monitor.len) * 100)
-        if percent > last_percent:
-            last_percent = percent
-            callback(percent)
+        p = int((monitor.bytes_read / monitor.len) * 100)
+        if p > last_percent:
+            last_percent = p
+            callback(p)
 
-    # Prepare multipart encoded data and wrap it with a monitor for progress tracking
-    encoder = MultipartEncoder(
-        fields={
-            "file": (filename, file_bytes)
-        }
-    )
+    encoder = MultipartEncoder(fields={"file": (filename, file_obj)})
     monitor = MultipartEncoderMonitor(encoder, progress_callback)
 
-    # Make the POST request with the monitored encoder
     try:
         r = requests.post(
             "https://www.anonfile.la/process/upload_file",
             data=monitor,
-            headers={"Content-Type": monitor.content_type}
+            headers={"Content-Type": monitor.content_type},
+            timeout=3600
         )
         r.raise_for_status()
-    except requests.RequestException as e:
-        # Log HTTP error status and payload if available
+        d = r.json()
+        if not d.get("success"):
+            raise Exception("Upload failed: " + d.get("message", "Unknown error"))
+        return d["url"].strip()
+    except requests.RequestException:
         status = getattr(r, "status_code", "No response")
         response_text = getattr(r, "text", "")
         print(f"HTTP error occurred: {status} - {response_text}")
         return ""
-
-    d = r.json()
-    if not d.get("success"):
-        raise Exception("Upload failed: " + d.get("message", "Unknown error"))
-    return d["url"].strip()
-
+    finally:
+        file_obj.close()
+        if temp_zip_file is not None and os.path.exists(temp_zip_file):
+            os.remove(temp_zip_file)
 
 def upload0x0(file_bytes: io.BytesIO, filename: str) -> str:
     file_bytes.seek(0)
@@ -125,18 +124,11 @@ def upload0x0(file_bytes: io.BytesIO, filename: str) -> str:
 
 
 if __name__ == "__main__":
-    file_path = "/Users/alex/Downloads/WoR_Release_2.3.1.zip"
-    with open(file_path, "rb") as f:
-        file_bytes = io.BytesIO(f.read())
-
+    path = "/Users/alex/Downloads/Rufus-4-6-Build-2205-BETA.exe"  # Source file path.
+    name = "Rufus-4-6-Build-2205-BETA.exe.zip"  # Explicit filename for the upload.
     print("Uploading file...")
     try:
-        # Use a lambda to print the progress percentage
-        url = upload_anonfiles(
-            file_bytes,
-            os.path.basename(file_path),
-            callback=lambda percent: print(f"Uploaded {percent:.2f}%")
-        )
-        print("File uploaded successfully. URL:", url)
+        url = upload_anonfiles(path, name, callback=lambda p: print(f"Uploaded {p}%"))
+        print("File uploaded successfully. URL:", url if url else "Upload failed")
     except Exception as e:
         print("An error occurred:", e)
