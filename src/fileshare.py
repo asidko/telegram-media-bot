@@ -1,8 +1,6 @@
 import io
-import os
-import tempfile
-import zipfile
-import requests
+import time
+import uuid
 from typing import Callable, Optional
 
 
@@ -49,29 +47,13 @@ class ProgressReader:
 
 import io
 import os
-import zipfile
 import requests
 from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
 
+ALLOWED_MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB in bytes
 
-def upload_anonfiles(file_path: str, filename: str, callback: Callable[[int], None] = lambda p: None) -> str:
-    allowed = {".zip", ".rar", ".jpg", ".jpeg", ".png", ".gif"}
-    _, ext = os.path.splitext(filename)
-    temp_zip_file = None
 
-    # If the provided filename's extension is not allowed, create a temporary ZIP file.
-    if ext.lower() not in allowed:
-        temp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
-        temp_zip_file = temp.name
-        temp.close()  # Close so zipfile can write to it.
-        with zipfile.ZipFile(temp_zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.write(file_path, arcname=filename)
-        filename += ".zip"
-        file_obj = open(temp_zip_file, "rb")
-    else:
-        file_obj = open(file_path, "rb")
-
-    file_obj.seek(0)
+def upload0x0(file_path: str, filename: str, callback: Callable[[int], None] = lambda p: None) -> str:
     last_percent = 0
 
     def progress_callback(monitor):
@@ -81,51 +63,76 @@ def upload_anonfiles(file_path: str, filename: str, callback: Callable[[int], No
             last_percent = p
             callback(p)
 
-    encoder = MultipartEncoder(fields={"file": (filename, file_obj)})
-    monitor = MultipartEncoderMonitor(encoder, progress_callback)
+    with open(file_path, "rb") as file_obj:
+        file_obj.seek(0)
+        encoder = MultipartEncoder(fields={"file": (filename, file_obj)})
+        monitor = MultipartEncoderMonitor(encoder, progress_callback)
+        response = requests.post("https://0x0.st", data=monitor, headers={"Content-Type": monitor.content_type})
+        response.raise_for_status()
+        return response.text.strip()
 
-    try:
-        r = requests.post(
-            "https://www.anonfile.la/process/upload_file",
-            data=monitor,
-            headers={"Content-Type": monitor.content_type},
-            timeout=3600
-        )
-        r.raise_for_status()
-        d = r.json()
-        if not d.get("success"):
-            raise Exception("Upload failed: " + d.get("message", "Unknown error"))
-        return d["url"].strip()
-    except requests.RequestException:
-        status = getattr(r, "status_code", "No response")
-        response_text = getattr(r, "text", "")
-        print(f"HTTP error occurred: {status} - {response_text}")
-        return ""
-    finally:
-        file_obj.close()
-        if temp_zip_file is not None and os.path.exists(temp_zip_file):
-            os.remove(temp_zip_file)
 
-def upload0x0(file_bytes: io.BytesIO, filename: str) -> str:
-    file_bytes.seek(0)
-    files = {'file': (filename, file_bytes)}
-    response = requests.post("https://0x0.st", files=files)
-    if response.status_code == 403:
-        # If 403 zip and try again
-        zipped_bytes = io.BytesIO()
-        with zipfile.ZipFile(zipped_bytes, "w", zipfile.ZIP_DEFLATED) as zipf:
-            file_bytes.seek(0)
-            zipf.writestr(filename, file_bytes.read())
-        zipped_bytes.seek(0)
-        files = {'file': (f"{filename}.zip", zipped_bytes)}
-        response = requests.post("https://0x0.st", files=files)
-    response.raise_for_status()
-    return response.text.strip()
+def upload_file(file_size_bytes: int, file_path: str, filename: str,
+                callback: Callable[[int], None] = lambda p: None) -> str:
+    threshold = 500 * 1024 * 1024  # 500 MB in bytes
+    file_size_mb = file_size_bytes / (1024 * 1024)  # Convert bytes to megabytes
 
+    if file_size_bytes <= threshold:
+        print(f'Uploading {filename} of size {file_size_mb:.2f}MB to 0x0 anonfiles...')
+        return upload0x0(file_path, filename, callback)
+
+    return ""
+
+
+def download(url: str, progress_callback: Optional[Callable[[int], None]] = None) -> str:
+    # Use a context manager to ensure the response is properly closed.
+    with requests.get(url, stream=True) as response:
+        response.raise_for_status()
+
+        total_size = int(response.headers.get('content-length', 0))
+        chunk_size = 1024  # You can adjust this chunk size if needed.
+        bytes_read = 0
+        last_reported = 0
+
+        filename = str(uuid.uuid4())  # Changed from uuid.uuid4().time to uuid.uuid4() for uniqueness.
+        # Create download directory if it doesn't exist.
+        download_dir = "/tmp/downloads"
+        os.makedirs(download_dir, exist_ok=True)
+        full_path = os.path.join(download_dir, filename)
+
+        # Report 0% progress at the start.
+        if progress_callback:
+            progress_callback(0)
+
+        with open(full_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:  # filter out keep-alive new chunks
+                    f.write(chunk)
+                    bytes_read += len(chunk)
+                    if total_size:
+                        percentage = int((bytes_read / total_size) * 100)
+                        if percentage > last_reported:
+                            last_reported = percentage
+                            if progress_callback:
+                                progress_callback(percentage)
+
+        # Ensure 100% progress is reported.
+        if progress_callback and last_reported < 100:
+            progress_callback(100)
+
+    # Delete all files older than 1 day (86400 seconds) from the download folder.
+    current_time = time.time()
+    for file in os.listdir(download_dir):
+        file_path = os.path.join(download_dir, file)
+        if os.path.isfile(file_path):
+            if current_time - os.path.getmtime(file_path) > 86400:
+                os.remove(file_path)
+
+    return full_path
 
 if __name__ == "__main__":
-    path = "/Users/alex/Downloads/Rufus-4-6-Build-2205-BETA.exe"  # Source file path.
-    name = "Rufus-4-6-Build-2205-BETA.exe.zip"  # Explicit filename for the upload.
+    path = "/Users/alex/Downloads/ISLP.pdf"  # Source file path.
+    name = "file.pdf"  # Explicit filename for the upload.
     print("Uploading file...")
     try:
         url = upload_anonfiles(path, name, callback=lambda p: print(f"Uploaded {p}%"))

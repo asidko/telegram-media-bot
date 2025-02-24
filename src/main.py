@@ -1,6 +1,5 @@
 import dataclasses
 import hashlib
-import io
 import os
 import threading
 import time
@@ -9,17 +8,17 @@ from dataclasses import dataclass, field
 
 import dotenv
 import telebot
-from cachetools import TTLCache
 from cachetools_ext.fs import FSLRUCache
 
+from fileshare import upload_file, ALLOWED_MAX_FILE_SIZE_BYTES
 from jackett import search_jackett
 from localization import localized
-from fileshare import upload_anonfiles
-from utils import fix_filename
 from torrent import create_magnet_link_from_url
 from torrent_provider import get_torrent_info_by_magnet_link, TorrentInfo, TorrentFileInfo
 from torrserver import torrserver_get_file, torrserver_get_file_download_link
-from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, get_file_icon, download
+from utils import fix_filename
+from utils import is_audio
+from utils import write_to_query_log, clean_text, remove_host_from_url, is_video, get_file_icon
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -34,8 +33,6 @@ WAIT_TIMEOUT_TO_NOTIFY_SECONDS = 15
 SEARCH_EXECUTION_TIMES = deque(maxlen=5)
 ADVERTISED_TORRSERVER_HOST = os.getenv('ADVERTISED_TORRSERVER_HOST')
 TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB = int(os.getenv('TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB', 50))
-FILESHARE_UPLOAD_LIMIT_MB = int(os.getenv('FILESHARE_UPLOAD_LIMIT_MB', 500))
-
 
 def get_average_search_execution_time() -> int:
     """Calculate average search time from recent executions."""
@@ -231,9 +228,9 @@ def handle_file_command(message):
 
         download_link_info = torrserver_get_file_download_link(torrent_hash, selected_file_id)
         full_link = ADVERTISED_TORRSERVER_HOST + remove_host_from_url(download_link_info.link)
-        file_title = f'<code>{os.path.basename(download_file.title)}</code> - {download_file.size}'
+        file_title = f'<b>{os.path.basename(download_file.title)}</b> - {download_file.size}'
         text = f"🥂{file_title}\n<pre>{full_link}</pre>"
-        if is_video(file_title):
+        if is_video(file_title) or is_audio(file_title):
             text += f"\n<i>* {localized(message, 'paste_link_to_player_warning')}</i>"
 
         controls = [
@@ -243,14 +240,14 @@ def handle_file_command(message):
         can_upload_to_telegram = download_file.size_bytes < TELEGRAM_DOCUMENT_UPLOAD_LIMIT_MB * 1024 ** 2
         if can_upload_to_telegram:
             controls.append(ResponseControl(
-                title=localized(message, '📩 Download to this chat'),
+                title=localized(message, 'download_telegram'),
                 action_key=f'download_telegram:{torrent_hash},{selected_file_id}'
             ))
 
-        can_fileshare_upload = download_file.size_bytes < FILESHARE_UPLOAD_LIMIT_MB * 1024 ** 2
+        can_fileshare_upload = download_file.size_bytes < ALLOWED_MAX_FILE_SIZE_BYTES
         if can_fileshare_upload:
             controls.append(ResponseControl(
-                title=localized(message, '📩 Download to fileshare'),
+                title=localized(message, 'download_fileshare'),
                 action_key=f'download_fileshare:{torrent_hash},{selected_file_id}'
             ))
 
@@ -407,7 +404,7 @@ def handle_download_telegram_callback_query(call):
                 message=localized(call, 'uploading_file_progress', link_info.file_name, progress),
             ), upload_mgs_id)
 
-        link = upload_anonfiles(file_path, link_info.file_name, update_upload_progress)
+        link = upload_file(link_info.size_bytes, file_path, link_info.file_name, update_upload_progress)
         if link:
             say(UserResponse(
                 user_id=call.from_user.id,
