@@ -1,9 +1,9 @@
-python-dotenv~=1.0.1
-humanize~=4.9.0
-requests~=2.31.0
+python-dotenv~=1.1.0
+humanize~=4.12.3
+requests~=2.32.4
 bencodepy~=0.9.5
-PyYAML~=6.0.1
-cachetools~=5.3.3
-pyTelegramBotAPI~=4.20.0
+PyYAML~=6.0.2
+cachetools~=6.0.0
+pyTelegramBotAPI~=4.27.0
 requests-toolbelt~=1.0.0
 cachetools-ext~=0.0.8

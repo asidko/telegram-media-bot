@@ -4,3 +4,4 @@ venv
 tmp/
 cache/
 logs/
+__pycache__/
